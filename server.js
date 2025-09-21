@@ -7,6 +7,8 @@ const { initializeDatabase } = require("./src/models/database");
 const tripRoutes = require("./src/routes/trips");
 const placeRoutes = require("./src/routes/places");
 const itineraryRoutes = require("./src/routes/itinerary");
+const paymentUserRoutes = require("./src/routes/paymentUsers");
+const expenseRoutes = require("./src/routes/expenses");
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -18,6 +20,8 @@ app.use(bodyParser.urlencoded({ extended: true }));
 app.use("/api/trips", tripRoutes);
 app.use("/api/places", placeRoutes);
 app.use("/api/itinerary", itineraryRoutes);
+app.use("/api/payment_users", paymentUserRoutes);
+app.use("/api/expenses", expenseRoutes);
 
 app.get("/api/health", (req, res) => {
   res.json({

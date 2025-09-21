@@ -69,6 +69,25 @@ const createTables = () => {
         FOREIGN KEY (day_plan_id) REFERENCES day_plans (id) ON DELETE CASCADE,
         FOREIGN KEY (place_id) REFERENCES places (id) ON DELETE CASCADE
       )`,
+      `CREATE TABLE IF NOT EXISTS payment_users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`,
+      `CREATE TABLE IF NOT EXISTS expenses (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        trip_id INTEGER NOT NULL,
+        amount REAL NOT NULL,
+        payment_user_id INTEGER,
+        description TEXT,
+        mode_of_payment TEXT DEFAULT 'UPI',
+        place_id INTEGER,
+        payment_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (trip_id) REFERENCES trips (id) ON DELETE CASCADE,
+        FOREIGN KEY (payment_user_id) REFERENCES payment_users (id) ON DELETE SET NULL,
+        FOREIGN KEY (place_id) REFERENCES places (id) ON DELETE SET NULL
+      )`,
     ];
 
     let completed = 0;
