@@ -14,9 +14,8 @@ const PlaceSchema = new mongoose.Schema({
         type: String,
         default: 'historical'
     },
-    estimated_duration: {
-        type: Number,
-        default: 60
+    estimatedDuration: {
+        type: Number
     },
     address: {
         type: String
