@@ -9,6 +9,7 @@ const placeRoutes = require("./src/routes/places");
 const itineraryRoutes = require("./src/routes/itinerary");
 const paymentUserRoutes = require("./src/routes/paymentUsers");
 const expenseRoutes = require("./src/routes/expenses");
+const ledgerRoutes = require("./src/routes/ledger");
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -22,6 +23,7 @@ app.use("/api/places", placeRoutes);
 app.use("/api/itinerary", itineraryRoutes);
 app.use("/api/payment_users", paymentUserRoutes);
 app.use("/api/expenses", expenseRoutes);
+app.use("/api/ledger", ledgerRoutes);
 
 app.get("/api/health", (req, res) => {
   res.json({

@@ -88,6 +88,11 @@ const createTables = () => {
         FOREIGN KEY (payment_user_id) REFERENCES payment_users (id) ON DELETE SET NULL,
         FOREIGN KEY (place_id) REFERENCES places (id) ON DELETE SET NULL
       )`,
+      `CREATE TABLE IF NOT EXISTS ledger_entries (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+        event_description TEXT NOT NULL
+      )`,
     ];
 
     let completed = 0;

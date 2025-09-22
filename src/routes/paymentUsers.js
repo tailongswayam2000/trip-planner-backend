@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const { getDatabase } = require("../models/database");
+const { addLedgerEntry } = require("../models/ledger");
 
 const toCamelCase = (obj) => {
   if (!obj) return null;
@@ -47,8 +48,10 @@ router.post("/", (req, res) => {
       }
       return res.status(500).json({ error: err.message });
     }
-    db.get("SELECT * FROM payment_users WHERE id = ?", [this.lastID], (e, row) => {
+    const userId = this.lastID;
+    db.get("SELECT * FROM payment_users WHERE id = ?", [userId], (e, row) => {
       if (e) return res.status(500).json({ error: e.message });
+      addLedgerEntry(`User ${row.name} (ID: ${userId}) was added.`);
       res.status(201).json(toCamelCase(row));
     });
   });
@@ -82,11 +85,19 @@ router.put("/:id", (req, res) => {
 // DELETE payment user
 router.delete("/:id", (req, res) => {
   const db = getDatabase();
-  db.run("DELETE FROM payment_users WHERE id = ?", [req.params.id], function (err) {
+  const userId = req.params.id;
+  db.get("SELECT name FROM payment_users WHERE id = ?", [userId], (err, row) => {
     if (err) return res.status(500).json({ error: err.message });
-    if (this.changes === 0)
-      return res.status(404).json({ error: "Payment user not found" });
-    res.json({ message: "Payment user deleted successfully" });
+    if (!row) return res.status(404).json({ error: "Payment user not found" });
+
+    const userName = row.name;
+    db.run("DELETE FROM payment_users WHERE id = ?", [userId], function (err) {
+      if (err) return res.status(500).json({ error: err.message });
+      if (this.changes === 0)
+        return res.status(404).json({ error: "Payment user not found" });
+      addLedgerEntry(`User ${userName} (ID: ${userId}) was deleted.`);
+      res.json({ message: "Payment user deleted successfully" });
+    });
   });
 });
 
