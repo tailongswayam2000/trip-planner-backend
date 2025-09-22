@@ -1,208 +1,166 @@
 const express = require("express");
 const router = express.Router();
-const { getDatabase } = require("../models/database");
+const DayPlan = require("../models/mongo/DayPlan");
+const DayPlanPlace = require("../models/mongo/DayPlanPlace");
+const Place = require("../models/mongo/Place");
 
 // Helper to group day plans with nested items
-const groupItinerary = (rows) => {
-  const byDay = new Map();
-  rows.forEach((r) => {
-    if (!byDay.has(r.dp_id)) {
-      byDay.set(r.dp_id, {
-        id: r.dp_id,
-        tripId: r.trip_id,
-        date: r.date,
-        items: [],
-      });
-    }
-    if (r.dpp_id) {
-      byDay.get(r.dp_id).items.push({
-        id: r.dpp_id,
-        placeId: r.place_id,
-        placeName: r.name,
-        category: r.category,
-        estimatedDuration: r.estimated_duration,
-        notes: r.notes,
-        address: r.address,
-        startTime: r.start_time,
-        endTime: r.end_time,
-        order: r.order_index,
-        travelTimeToNext: r.travel_time_to_next,
-      });
-    }
+const groupItinerary = (dayPlans) => {
+  const grouped = dayPlans.map(dp => {
+    const items = dp.places.map(dpp => ({
+      _id: dpp._id,
+      placeId: dpp.place_id._id,
+      placeName: dpp.place_id.name,
+      category: dpp.place_id.category,
+      estimatedDuration: dpp.place_id.estimated_duration,
+      notes: dpp.place_id.notes,
+      address: dpp.place_id.address,
+      startTime: dpp.start_time,
+      endTime: dpp.end_time,
+      order: dpp.order_index,
+      travelTimeToNext: dpp.travel_time_to_next,
+    }));
+    return {
+      _id: dp._id,
+      trip_id: dp.trip_id,
+      date: dp.date,
+      items: items.sort((a, b) => a.order - b.order),
+    };
   });
-  return Array.from(byDay.values()).sort((a, b) =>
-    a.date.localeCompare(b.date)
-  );
+  return grouped.sort((a, b) => a.date.localeCompare(b.date));
 };
 
 // GET itinerary for a trip (grouped)
-router.get("/:tripId", (req, res) => {
-  const db = getDatabase();
-  const sql = `
-    SELECT 
-      dp.id as dp_id, dp.trip_id, dp.date,
-      dpp.id as dpp_id, dpp.place_id, dpp.start_time, dpp.end_time, dpp.order_index, dpp.travel_time_to_next,
-      p.name, p.category, p.estimated_duration, p.notes, p.address
-    FROM day_plans dp
-    LEFT JOIN day_plan_places dpp ON dp.id = dpp.day_plan_id
-    LEFT JOIN places p ON dpp.place_id = p.id
-    WHERE dp.trip_id = ?
-    ORDER BY dp.date ASC, dpp.order_index ASC
-  `;
-  db.all(sql, [req.params.tripId], (err, rows) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(groupItinerary(rows));
-  });
+router.get("/:tripId", async (req, res) => {
+  try {
+    const dayPlans = await DayPlan.find({ trip_id: req.params.tripId }).populate({
+      path: "places", // Assuming a virtual populate for places in DayPlan model
+      populate: {
+        path: "place_id",
+        model: "Place",
+      },
+    });
+    console.log("Backend Itinerary data sent:", dayPlans);
+    res.json(groupItinerary(dayPlans));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // CREATE day plan
-router.post("/", (req, res) => {
+router.post("/", async (req, res) => {
   const { tripId, date } = req.body;
-  const db = getDatabase();
-  db.run(
-    "INSERT INTO day_plans (trip_id, date) VALUES (?, ?)",
-    [tripId, date],
-    function (err) {
-      if (err) return res.status(500).json({ error: err.message });
-      db.get("SELECT * FROM day_plans WHERE id=?", [this.lastID], (e, row) => {
-        if (e) return res.status(500).json({ error: e.message });
-        res.status(201).json(row);
-      });
-    }
-  );
+  try {
+    const newDayPlan = await DayPlan.create({ trip_id: tripId, date });
+    console.log("Backend DayPlan created:", newDayPlan);
+    res.status(201).json(newDayPlan);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // UPDATE day plan date
-router.put("/:dayPlanId", (req, res) => {
+router.put("/:dayPlanId", async (req, res) => {
   const { date } = req.body;
-  const db = getDatabase();
-  db.run(
-    "UPDATE day_plans SET date=? WHERE id=?",
-    [date, req.params.dayPlanId],
-    function (err) {
-      if (err) return res.status(500).json({ error: err.message });
-      if (this.changes === 0)
-        return res.status(404).json({ error: "Day plan not found" });
-      db.get(
-        "SELECT * FROM day_plans WHERE id=?",
-        [req.params.dayPlanId],
-        (e, row) => {
-          if (e) return res.status(500).json({ error: e.message });
-          res.json(row);
-        }
-      );
-    }
-  );
+  try {
+    const updatedDayPlan = await DayPlan.findByIdAndUpdate(
+      req.params.dayPlanId,
+      { date },
+      { new: true, runValidators: true }
+    );
+    if (!updatedDayPlan)
+      return res.status(404).json({ error: "Day plan not found" });
+    res.json(updatedDayPlan);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // DELETE day plan
-router.delete("/:dayPlanId", (req, res) => {
-  const db = getDatabase();
-  db.run(
-    "DELETE FROM day_plans WHERE id=?",
-    [req.params.dayPlanId],
-    function (err) {
-      if (err) return res.status(500).json({ error: err.message });
-      if (this.changes === 0)
-        return res.status(404).json({ error: "Day plan not found" });
-      res.json({ message: "Day plan deleted successfully" });
-    }
-  );
+router.delete("/:dayPlanId", async (req, res) => {
+  try {
+    const deletedDayPlan = await DayPlan.findByIdAndDelete(req.params.dayPlanId);
+    if (!deletedDayPlan)
+      return res.status(404).json({ error: "Day plan not found" });
+    // Also delete associated DayPlanPlaces
+    await DayPlanPlace.deleteMany({ day_plan_id: req.params.dayPlanId });
+    res.json({ message: "Day plan deleted successfully" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ADD place to a day
-router.post("/:dayPlanId/places", (req, res) => {
+router.post("/:dayPlanId/places", async (req, res) => {
   const { placeId, startTime, endTime, order, travelTimeToNext } = req.body;
-  const db = getDatabase();
-  const sql = `INSERT INTO day_plan_places (day_plan_id, place_id, start_time, end_time, order_index, travel_time_to_next)
-               VALUES (?, ?, ?, ?, ?, ?)`;
-  db.run(
-    sql,
-    [
-      req.params.dayPlanId,
-      placeId,
-      startTime,
-      endTime,
-      order,
-      travelTimeToNext || null,
-    ],
-    function (err) {
-      if (err) return res.status(500).json({ error: err.message });
-      db.get(
-        "SELECT * FROM day_plan_places WHERE id=?",
-        [this.lastID],
-        (e, row) => {
-          if (e) return res.status(500).json({ error: e.message });
-          res.status(201).json(row);
-        }
-      );
-    }
-  );
+  try {
+    const newDayPlanPlace = await DayPlanPlace.create({
+      day_plan_id: req.params.dayPlanId,
+      place_id: placeId,
+      start_time: startTime,
+      end_time: endTime,
+      order_index: order,
+      travel_time_to_next: travelTimeToNext || null,
+    });
+    res.status(201).json(newDayPlanPlace);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // UPDATE a place within day
-router.put("/:dayPlanId/places/:id", (req, res) => {
+router.put("/:dayPlanId/places/:id", async (req, res) => {
   const { placeId, startTime, endTime, order, travelTimeToNext } = req.body;
-  const db = getDatabase();
-  const sql = `UPDATE day_plan_places SET place_id=?, start_time=?, end_time=?, order_index=?, travel_time_to_next=? WHERE id=? AND day_plan_id=?`;
-  db.run(
-    sql,
-    [
-      placeId,
-      startTime,
-      endTime,
-      order,
-      travelTimeToNext || null,
-      req.params.id,
-      req.params.dayPlanId,
-    ],
-    function (err) {
-      if (err) return res.status(500).json({ error: err.message });
-      if (this.changes === 0)
-        return res.status(404).json({ error: "Item not found" });
-      db.get(
-        "SELECT * FROM day_plan_places WHERE id=?",
-        [req.params.id],
-        (e, row) => {
-          if (e) return res.status(500).json({ error: e.message });
-          res.json(row);
-        }
-      );
-    }
-  );
+  try {
+    const updatedDayPlanPlace = await DayPlanPlace.findOneAndUpdate(
+      { _id: req.params.id, day_plan_id: req.params.dayPlanId },
+      {
+        place_id: placeId,
+        start_time: startTime,
+        end_time: endTime,
+        order_index: order,
+        travel_time_to_next: travelTimeToNext || null,
+      },
+      { new: true, runValidators: true }
+    );
+    if (!updatedDayPlanPlace)
+      return res.status(404).json({ error: "Item not found" });
+    res.json(updatedDayPlanPlace);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // DELETE a place from day
-router.delete("/:dayPlanId/places/:id", (req, res) => {
-  const db = getDatabase();
-  db.run(
-    "DELETE FROM day_plan_places WHERE id=? AND day_plan_id=?",
-    [req.params.id, req.params.dayPlanId],
-    function (err) {
-      if (err) return res.status(500).json({ error: err.message });
-      if (this.changes === 0)
-        return res.status(404).json({ error: "Item not found" });
-      res.json({ message: "Item deleted successfully" });
-    }
-  );
+router.delete("/:dayPlanId/places/:id", async (req, res) => {
+  try {
+    const deletedDayPlanPlace = await DayPlanPlace.findOneAndDelete({
+      _id: req.params.id,
+      day_plan_id: req.params.dayPlanId,
+    });
+    if (!deletedDayPlanPlace)
+      return res.status(404).json({ error: "Item not found" });
+    res.json({ message: "Item deleted successfully" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // REORDER items in day
-router.put("/:dayPlanId/reorder", (req, res) => {
+router.put("/:dayPlanId/reorder", async (req, res) => {
   const { order } = req.body; // [{id, order}, ...]
-  const db = getDatabase();
-  db.serialize(() => {
-    const stmt = db.prepare(
-      "UPDATE day_plan_places SET order_index=? WHERE id=? AND day_plan_id=?"
+  try {
+    const updates = order.map((o) =>
+      DayPlanPlace.findOneAndUpdate(
+        { _id: o.id, day_plan_id: req.params.dayPlanId },
+        { order_index: o.order }
+      )
     );
-    order.forEach((o) => {
-      stmt.run([o.order, o.id, req.params.dayPlanId]);
-    });
-    stmt.finalize((err) => {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json({ message: "Reordered successfully" });
-    });
-  });
+    await Promise.all(updates);
+    res.json({ message: "Reordered successfully" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 module.exports = router;

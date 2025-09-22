@@ -1,56 +1,55 @@
 const express = require("express");
 const router = express.Router();
-const { getDatabase } = require("../models/database");
-const { addLedgerEntry } = require("../models/ledger");
-
-const toCamelCase = (obj) => {
-  if (!obj) return null;
-  const newObj = {};
-  for (const key in obj) {
-    const camelKey = key.replace(/_([a-z])/g, (g) => g[1].toUpperCase());
-    newObj[camelKey] = obj[key];
-  }
-  return newObj;
-};
+const Expense = require("../models/mongo/Expense");
+const PaymentUser = require("../models/mongo/PaymentUser");
+const Place = require("../models/mongo/Place");
+const Ledger = require("../models/mongo/Ledger");
 
 // GET all expenses
-router.get("/", (req, res) => {
-  const db = getDatabase();
-  const { tripId } = req.query;
-  let sql = `SELECT e.*, pu.name as payment_user_name, p.name as place_name FROM expenses e
-             LEFT JOIN payment_users pu ON e.payment_user_id = pu.id
-             LEFT JOIN places p ON e.place_id = p.id`;
-  const params = [];
+router.get("/", async (req, res) => {
+  try {
+    const { tripId } = req.query;
+    const query = tripId ? { trip_id: tripId } : {};
+    const expenses = await Expense.find(query)
+      .populate("paid_by", "name _id")
+      .populate("place_id", "name")
+      .sort({ payment_time: -1 });
 
-  if (tripId) {
-    sql += ` WHERE e.trip_id = ?`;
-    params.push(tripId);
+    const formattedExpenses = expenses.map((expense) => ({
+      ...expense.toObject(),
+      paymentUserName: expense.paid_by ? expense.paid_by.name : null,
+      placeName: expense.place_id ? expense.place_id.name : null,
+      modeOfPayment: expense.mode_of_payment,
+    }));
+
+    res.json(formattedExpenses);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
-
-  sql += ` ORDER BY e.payment_time DESC`;
-
-  db.all(sql, params, (err, rows) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(rows.map(toCamelCase));
-  });
 });
 
 // GET expense by id
-router.get("/:id", (req, res) => {
-  const db = getDatabase();
-  const sql = `SELECT e.*, pu.name as payment_user_name, p.name as place_name FROM expenses e
-             LEFT JOIN payment_users pu ON e.payment_user_id = pu.id
-             LEFT JOIN places p ON e.place_id = p.id
-             WHERE e.id = ?`;
-  db.get(sql, [req.params.id], (err, row) => {
-    if (err) return res.status(500).json({ error: err.message });
-    if (!row) return res.status(404).json({ error: "Expense not found" });
-    res.json(toCamelCase(row));
-  });
+router.get("/:id", async (req, res) => {
+  try {
+    const expense = await Expense.findById(req.params.id)
+      .populate("paid_by", "name")
+      .populate("place_id", "name");
+    if (!expense) return res.status(404).json({ error: "Expense not found" });
+
+    const formattedExpense = {
+      ...expense.toObject(),
+      paymentUserName: expense.paid_by ? expense.paid_by.name : null,
+      placeName: expense.place_id ? expense.place_id.name : null,
+      modeOfPayment: expense.mode_of_payment,
+    };
+    res.json(formattedExpense);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // CREATE expense
-router.post("/", (req, res) => {
+router.post("/", async (req, res) => {
   const {
     tripId,
     amount,
@@ -65,42 +64,55 @@ router.post("/", (req, res) => {
     return res.status(400).json({ error: "Trip ID and amount are required" });
   }
 
-  const db = getDatabase();
-  const sql = `INSERT INTO expenses (trip_id, amount, payment_user_id, description, mode_of_payment, place_id, payment_time)
-               VALUES (?, ?, ?, ?, ?, ?, ?)`;
-  db.run(
-    sql,
-    [
-      tripId,
+  try {
+    const newExpense = await Expense.create({
+      trip_id: tripId,
       amount,
-      paymentUserId === '' ? null : paymentUserId,
+      paid_by: paymentUserId === "" ? null : paymentUserId,
       description,
-      modeOfPayment,
-      placeId === '' ? null : placeId,
-      paymentTime,
-    ],
-    function (err) {
-      if (err) return res.status(500).json({ error: err.message });
-      const expenseId = this.lastID;
-      const selectSql = `SELECT e.*, pu.name as payment_user_name, p.name as place_name FROM expenses e
-                         LEFT JOIN payment_users pu ON e.payment_user_id = pu.id
-                         LEFT JOIN places p ON e.place_id = p.id
-                         WHERE e.id = ?`;
-      db.get(selectSql, [expenseId], (e, row) => {
-        if (e) return res.status(500).json({ error: e.message });
-        const payerName = row.payment_user_name || "N/A";
-        const placeName = row.place_name || "N/A";
-        addLedgerEntry(
-          `Expense of ₹${row.amount} for '${row.description || "No description"}' was added by ${payerName} (Mode: ${row.mode_of_payment}) on ${new Date(row.payment_time).toLocaleString()} and linked to ${placeName}.`
-        );
-        res.status(201).json(toCamelCase(row));
-      });
-    }
-  );
+      mode_of_payment: modeOfPayment,
+      place_id: placeId === "" ? null : placeId,
+      payment_time: paymentTime,
+    });
+
+    const populatedExpense = await Expense.findById(newExpense._id)
+      .populate("paid_by", "name")
+      .populate("place_id", "name");
+
+    const payerName = populatedExpense.paid_by
+      ? populatedExpense.paid_by.name
+      : "N/A";
+    const placeName = populatedExpense.place_id
+      ? populatedExpense.place_id.name
+      : "N/A";
+
+    await Ledger.create({
+      trip_id: tripId,
+      payer_id: paymentUserId === "" ? null : paymentUserId,
+      payee_id: null, // Assuming payee is not directly set on expense creation
+      amount: amount,
+      currency: populatedExpense.currency, // Assuming currency is set in Expense model default
+      event_description: `Expense of Rs.${amount} for '${
+        description || "No description"
+      }' was added by ${payerName} (Mode: ${modeOfPayment}) on ${new Date(
+        paymentTime
+      ).toLocaleString()} and linked to ${placeName}.`,
+    });
+
+    res.status(201).json({
+      ...populatedExpense.toObject(),
+      paymentUserName: payerName,
+      placeName: placeName,
+      modeOfPayment: populatedExpense.mode_of_payment,
+    });
+  } catch (err) {
+    console.error("Error creating expense:", err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // UPDATE expense
-router.put("/:id", (req, res) => {
+router.put("/:id", async (req, res) => {
   const {
     tripId,
     amount,
@@ -115,57 +127,122 @@ router.put("/:id", (req, res) => {
     return res.status(400).json({ error: "Trip ID and amount are required" });
   }
 
-  const db = getDatabase();
-  const sql = `UPDATE expenses SET trip_id=?, amount=?, payment_user_id=?, description=?, mode_of_payment=?, place_id=?, payment_time=? WHERE id=?`;
-  db.run(
-    sql,
-    [
-      tripId,
-      amount,
-      paymentUserId === '' ? null : paymentUserId,
-      description,
-      modeOfPayment,
-      placeId === '' ? null : placeId,
-      paymentTime,
-      req.params.id,
-    ],
-    function (err) {
-      if (err) return res.status(500).json({ error: err.message });
-      if (this.changes === 0)
-        return res.status(404).json({ error: "Expense not found" });
-      db.get("SELECT * FROM expenses WHERE id = ?", [req.params.id], (e, row) => {
-        if (e) return res.status(500).json({ error: e.message });
-        res.json(toCamelCase(row));
-      });
+  try {
+    const originalExpense = await Expense.findById(req.params.id);
+    if (!originalExpense) {
+      return res.status(404).json({ error: "Expense not found" });
     }
-  );
+
+    const updatedExpense = await Expense.findByIdAndUpdate(
+      req.params.id,
+      {
+        trip_id: tripId,
+        amount,
+        paid_by: paymentUserId === "" ? null : paymentUserId,
+        description,
+        mode_of_payment: modeOfPayment,
+        place_id: placeId === "" ? null : placeId,
+        payment_time: paymentTime,
+      },
+      { new: true, runValidators: true }
+    )
+      .populate("paid_by", "name")
+      .populate("place_id", "name");
+
+    if (!updatedExpense)
+      return res.status(404).json({ error: "Expense not found" });
+
+    const payerName = updatedExpense.paid_by
+      ? updatedExpense.paid_by.name
+      : "N/A";
+    const placeName = updatedExpense.place_id
+      ? updatedExpense.place_id.name
+      : "N/A";
+
+    // Create a more detailed ledger entry for the update
+    let event_description = `Expense with ID ${updatedExpense._id} was updated.\n`;
+    const original = originalExpense.toObject();
+    const updated = updatedExpense.toObject();
+
+    const changedFields = Object.keys(updated).filter((key) => {
+      if (key === "paid_by" || key === "place_id") {
+        // Handle ObjectId comparison
+        return (
+          original[key] &&
+          updated[key] &&
+          original[key].toString() !== updated[key].toString()
+        );
+      }
+      return original[key] !== updated[key];
+    });
+
+    changedFields.forEach((field) => {
+      event_description += `  - ${field}: from '${original[field]}' to '${updated[field]}'\n`;
+    });
+
+    if (changedFields.length === 0) {
+      event_description += "No fields were changed.";
+    }
+
+    await Ledger.create({
+      trip_id: tripId,
+      payer_id: paymentUserId === "" ? null : paymentUserId,
+      payee_id: null,
+      amount: amount,
+      currency: updatedExpense.currency,
+      event_description: event_description,
+    });
+
+    res.json({
+      ...updatedExpense.toObject(),
+      paymentUserName: payerName,
+      placeName: placeName,
+      modeOfPayment: updatedExpense.mode_of_payment,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // DELETE expense
-router.delete("/:id", (req, res) => {
-  const db = getDatabase();
+router.delete("/:id", async (req, res) => {
   const expenseId = req.params.id;
-  const selectSql = `SELECT e.*, pu.name as payment_user_name, p.name as place_name FROM expenses e
-                     LEFT JOIN payment_users pu ON e.payment_user_id = pu.id
-                     LEFT JOIN places p ON e.place_id = p.id
-                     WHERE e.id = ?`;
-  db.get(selectSql, [expenseId], (err, row) => {
-    if (err) return res.status(500).json({ error: err.message });
-    if (!row) return res.status(404).json({ error: "Expense not found" });
+  try {
+    const expenseDetails = await Expense.findById(expenseId)
+      .populate("paid_by", "name")
+      .populate("place_id", "name");
 
-    const expenseDetails = row;
-    db.run("DELETE FROM expenses WHERE id = ?", [expenseId], function (err) {
-      if (err) return res.status(500).json({ error: err.message });
-      if (this.changes === 0)
-        return res.status(404).json({ error: "Expense not found" });
-      const payerName = expenseDetails.payment_user_name || "N/A";
-      const placeName = expenseDetails.place_name || "N/A";
-      addLedgerEntry(
-        `Expense of ₹${expenseDetails.amount} for '${expenseDetails.description || "No description"}' paid by ${payerName} (Mode: ${expenseDetails.mode_of_payment}) on ${new Date(expenseDetails.payment_time).toLocaleString()} and linked to ${placeName} was deleted.`
-      );
-      res.json({ message: "Expense deleted successfully" });
+    if (!expenseDetails)
+      return res.status(404).json({ error: "Expense not found" });
+
+    await Expense.findByIdAndDelete(expenseId);
+
+    const payerName = expenseDetails.paid_by
+      ? expenseDetails.paid_by.name
+      : "N/A";
+    const placeName = expenseDetails.place_id
+      ? expenseDetails.place_id.name
+      : "N/A";
+
+    await Ledger.create({
+      trip_id: expenseDetails.trip_id,
+      payer_id: expenseDetails.paid_by ? expenseDetails.paid_by._id : null,
+      payee_id: null, // Assuming payee is not directly set on expense deletion
+      amount: expenseDetails.amount,
+      currency: expenseDetails.currency,
+      event_description: `Expense of Rs.${expenseDetails.amount} for '${
+        expenseDetails.description || "No description"
+      }' paid by ${payerName} (Mode: ${
+        expenseDetails.mode_of_payment
+      }) on ${new Date(
+        expenseDetails.payment_time
+      ).toLocaleString()} and linked to ${placeName} was deleted.`,
     });
-  });
+
+    res.json({ message: "Expense deleted successfully" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 module.exports = router;

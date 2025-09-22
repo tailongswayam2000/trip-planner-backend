@@ -3,7 +3,7 @@ const cors = require("cors");
 const bodyParser = require("body-parser");
 require("dotenv").config();
 
-const { initializeDatabase } = require("./src/models/database");
+const connectDB = require("./src/config/db");
 const tripRoutes = require("./src/routes/trips");
 const placeRoutes = require("./src/routes/places");
 const itineraryRoutes = require("./src/routes/itinerary");
@@ -50,7 +50,7 @@ app.use("*", (req, res) => {
 
 const startServer = async () => {
   try {
-    await initializeDatabase();
+    await connectDB();
     console.log("Database initialized successfully");
     app.listen(PORT, () => {
       console.log(`Server is running on port ${PORT}`);

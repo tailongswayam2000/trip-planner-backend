@@ -1,88 +1,78 @@
 const express = require("express");
 const router = express.Router();
-const { getDatabase } = require("../models/database");
+const Place = require("../models/mongo/Place");
 
 // GET all places
-router.get("/", (req, res) => {
-  const db = getDatabase();
-  db.all("SELECT * FROM places ORDER BY created_at DESC", [], (err, rows) => {
-    console.log(rows);
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(rows);
-  });
+router.get("/", async (req, res) => {
+  try {
+    const places = await Place.find().sort({ createdAt: -1 });
+    res.json(places);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // GET place by id
-router.get("/:id", (req, res) => {
-  const db = getDatabase();
-  db.get("SELECT * FROM places WHERE id=?", [req.params.id], (err, row) => {
-    if (err) return res.status(500).json({ error: err.message });
-    if (!row) return res.status(404).json({ error: "Place not found" });
-    res.json(row);
-  });
+router.get("/:id", async (req, res) => {
+  try {
+    const place = await Place.findById(req.params.id);
+    if (!place) return res.status(404).json({ error: "Place not found" });
+    res.json(place);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // CREATE place
-router.post("/", (req, res) => {
-  const { name, category, estimatedDuration, notes, address } = req.body;
-  const db = getDatabase();
-  const sql = `INSERT INTO places (name, category, estimated_duration, notes, address) VALUES (?, ?, ?, ?, ?)`;
-  db.run(
-    sql,
-    [name, category, estimatedDuration, notes, address],
-    function (err) {
-      if (err) return res.status(500).json({ error: err.message });
-      db.get("SELECT * FROM places WHERE id=?", [this.lastID], (e, row) => {
-        if (e) return res.status(500).json({ error: e.message });
-        res.status(201).json(row);
-      });
-    }
-  );
+router.post("/", async (req, res) => {
+  console.log("Received place data:", req.body);
+  try {
+    const place = await Place.create(req.body);
+    res.status(201).json(place);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // UPDATE place
-router.put("/:id", (req, res) => {
-  const { name, category, estimatedDuration, notes, address } = req.body;
-  const db = getDatabase();
-  const sql = `UPDATE places SET name=?, category=?, estimated_duration=?, notes=?, address=? WHERE id=?`;
-  db.run(
-    sql,
-    [name, category, estimatedDuration, notes, address, req.params.id],
-    function (err) {
-      if (err) return res.status(500).json({ error: err.message });
-      if (this.changes === 0)
-        return res.status(404).json({ error: "Place not found" });
-      db.get("SELECT * FROM places WHERE id=?", [req.params.id], (e, row) => {
-        if (e) return res.status(500).json({ error: e.message });
-        res.json(row);
-      });
-    }
-  );
+router.put("/:id", async (req, res) => {
+  try {
+    const place = await Place.findByIdAndUpdate(req.params.id, req.body, {
+      new: true,
+      runValidators: true,
+    });
+    if (!place) return res.status(404).json({ error: "Place not found" });
+    res.json(place);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // DELETE place
-router.delete("/:id", (req, res) => {
-  const db = getDatabase();
-  db.run("DELETE FROM places WHERE id=?", [req.params.id], function (err) {
-    if (err) return res.status(500).json({ error: err.message });
-    if (this.changes === 0)
-      return res.status(404).json({ error: "Place not found" });
+router.delete("/:id", async (req, res) => {
+  try {
+    const place = await Place.findByIdAndDelete(req.params.id);
+    if (!place) return res.status(404).json({ error: "Place not found" });
     res.json({ message: "Place deleted successfully" });
-  });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // SEARCH places
-router.get("/search/q", (req, res) => {
+router.get("/search/q", async (req, res) => {
   const q = req.query.q || "";
-  const db = getDatabase();
-  db.all(
-    "SELECT * FROM places WHERE name LIKE ? OR address LIKE ? ORDER BY created_at DESC",
-    [`%${q}%`, `%${q}%`],
-    (err, rows) => {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json(rows);
-    }
-  );
+  try {
+    const places = await Place.find({
+      $or: [
+        { name: { $regex: q, $options: "i" } },
+        { address: { $regex: q, $options: "i" } },
+      ],
+    }).sort({ createdAt: -1 });
+    res.json(places);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 module.exports = router;
