@@ -7,7 +7,12 @@ const Expense = require("../models/mongo/Expense");
 // GET all payment users
 router.get("/", async (req, res) => {
   try {
-    const paymentUsers = await PaymentUser.find().sort({ createdAt: -1 });
+    const { trip_id } = req.query;
+    let query = {};
+    if (trip_id) {
+      query.trip_id = trip_id;
+    }
+    const paymentUsers = await PaymentUser.find(query).sort({ createdAt: -1 });
     res.json(paymentUsers);
   } catch (err) {
     res.status(500).json({ error: err.message });

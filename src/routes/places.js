@@ -5,9 +5,17 @@ const Place = require("../models/mongo/Place");
 // GET all places
 router.get("/", async (req, res) => {
   try {
-    const places = await Place.find().sort({ createdAt: -1 });
+    const { trip_id } = req.query;
+    let query = {};
+    if (trip_id) {
+      query.trip_id = trip_id;
+    }
+    const places = await Place.find(query)
+      .sort({ createdAt: -1 })
+      .where({ trip_id });
     res.json(places);
   } catch (err) {
+    console.error("Error in GET /places:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
