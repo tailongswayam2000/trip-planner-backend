@@ -10,6 +10,9 @@ const itineraryRoutes = require("./src/routes/itinerary");
 const paymentUserRoutes = require("./src/routes/paymentUsers");
 const expenseRoutes = require("./src/routes/expenses");
 const ledgerRoutes = require("./src/routes/ledger");
+const participantRoutes = require("./src/routes/participants");
+const familyRoutes = require("./src/routes/families");
+const settlementRoutes = require("./src/routes/settlements");
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -24,6 +27,9 @@ app.use("/api/itinerary", itineraryRoutes);
 app.use("/api/payment_users", paymentUserRoutes);
 app.use("/api/expenses", expenseRoutes);
 app.use("/api/ledger", ledgerRoutes);
+app.use("/api/participants", participantRoutes);
+app.use("/api/families", familyRoutes);
+app.use("/api/settlements", settlementRoutes);
 
 app.get("/api/health", (req, res) => {
   res.json({

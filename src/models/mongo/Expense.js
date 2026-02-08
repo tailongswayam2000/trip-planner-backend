@@ -4,7 +4,8 @@ const ExpenseSchema = new mongoose.Schema({
     trip_id: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Trip',
-        required: true
+        required: true,
+        index: true
     },
     description: {
         type: String,
@@ -18,13 +19,34 @@ const ExpenseSchema = new mongoose.Schema({
         type: String,
         default: 'INR'
     },
+    category: {
+        type: String,
+        enum: ['food', 'transport', 'stay', 'tickets', 'shopping', 'other'],
+        default: 'other'
+    },
     payment_time: {
         type: Date,
         default: Date.now
     },
+    // Legacy field - keep for backward compatibility
     paid_by: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'PaymentUser'
+    },
+    // New participant-based payer
+    paidByParticipant: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Participant'
+    },
+    // Who this expense is split among
+    splitAmong: [{
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Participant'
+    }],
+    // If true, expense is only for the payer (personal expense)
+    isPersonal: {
+        type: Boolean,
+        default: false
     },
     place_id: {
         type: mongoose.Schema.Types.ObjectId,
@@ -34,6 +56,8 @@ const ExpenseSchema = new mongoose.Schema({
         type: String,
         default: 'UPI'
     }
+}, {
+    timestamps: true
 });
 
 module.exports = mongoose.model('Expense', ExpenseSchema);
