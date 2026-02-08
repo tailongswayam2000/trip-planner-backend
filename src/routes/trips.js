@@ -98,6 +98,46 @@ router.post("/verify-security", async (req, res) => {
   }
 });
 
+// GET recovery question (to show user what question to answer)
+router.post("/recovery-question", async (req, res) => {
+  try {
+    const { name, destination } = req.body;
+
+    // Find trips matching name and destination (case-insensitive)
+    const trips = await Trip.find({
+      name: { $regex: new RegExp(`^${name.trim()}$`, 'i') },
+      destination: { $regex: new RegExp(`^${destination.trim()}$`, 'i') }
+    });
+
+    if (trips.length === 0) {
+      return res.status(404).json({ error: "No trip found with that name and destination." });
+    }
+
+    const trip = trips[0];
+
+    // For legacy trips without recovery question
+    if (trip.isLegacy && !trip.recoveryQuestion) {
+      return res.json({
+        isLegacy: true,
+        accessCode: trip.accessCode,
+        message: "This is a legacy trip. No recovery question was set."
+      });
+    }
+
+    if (!trip.recoveryQuestion) {
+      return res.status(400).json({ error: "This trip does not have a recovery question set." });
+    }
+
+    res.json({
+      recoveryQuestion: trip.recoveryQuestion,
+      tripName: trip.name,
+      destination: trip.destination
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // RECOVER access code
 router.post("/recover", async (req, res) => {
   try {
