@@ -142,21 +142,7 @@ router.post("/recover", async (req, res) => {
 // ===========================================
 
 // GET all trips (kept for backwards compatibility, can be removed later)
-router.get("/", async (req, res) => {
-  try {
-    const trips = await Trip.find().sort({ createdAt: -1 });
-    // Remove sensitive fields
-    const safeTrips = trips.map(t => {
-      const obj = t.toObject();
-      delete obj.recoveryAnswer;
-      delete obj.securityAnswer;
-      return obj;
-    });
-    res.json(safeTrips);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+
 
 // GET trip by id
 router.get("/:id", async (req, res) => {
